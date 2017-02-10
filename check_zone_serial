@@ -64,12 +64,10 @@ quit("CRITICAL", "Cannot check domains from CLI and file at the same time")
 @nameservers = @cli_nameservers;
 
     ## Find duplicates in domains
-my $domains_hash = {};
-foreach my $domain_to_check (@domains_to_check) {
-    quit("CRITICAL", "Domain $domain_to_check is defined twice")
-        if (exists($domains_hash->{ $domain_to_check }));
-    $domains_hash->{ $domain_to_check } = 1;
-}
+has_duplicates_in_array('Domain', @domains_to_check);
+
+    ## Find duplicates in nameservers
+has_duplicates_in_array('Nameserver', @nameservers);
 
     ## Check user has specified enough nameservers
 quit("CRITICAL", "If specifying nameserver, you must specify two or more")
@@ -160,6 +158,18 @@ sub get_nameservers_for_domain {
 
     my %h = map{ $_->nsdname => 1 } $result->answer;
     return keys(%h);
+}
+
+sub has_duplicates_in_array {
+    my $type = shift;
+    my @array = @_;
+    my $hash = {};
+    foreach my $item (@array) {
+        quit("CRITICAL", "$type $item is defined twice")
+            if (exists($hash->{ $item }));
+        $hash->{ $item } = 1;
+    }
+    return 1;
 }
 
     ## Function to handle output
