@@ -98,8 +98,10 @@ foreach my $domain_to_check (@domains_to_check) {
         : get_nameservers_for_domain($domain_to_check);
 
         ## Check that we have enough nameservers
-    $errors->{ $domain_to_check } = "less than 2 nameservers"
-        if (scalar(@check_nameservers) < 2);
+    if (scalar(@check_nameservers) < 2) {
+        $errors->{ $domain_to_check } = "less than 2 nameservers";
+        next;
+    }
 
     my $serials = {};
 
@@ -110,6 +112,11 @@ foreach my $domain_to_check (@domains_to_check) {
 
             ## Query SOA
         my $result = $resolver->query($domain_to_check, 'SOA');
+        unless ($result) {
+            $errors->{ $domain_to_check } = "no results from $nameserver";
+            next;
+        }
+
         my @answers = $result->answer;
 
             ## Error if there's more than one SOA answer
@@ -148,7 +155,8 @@ sub get_nameservers_for_domain {
     my $domain = shift;
 
     my $resolver = Net::DNS::Resolver->new();
-    my $result = $resolver->query($domain, 'NS');
+    my $result = $resolver->query($domain, 'NS')
+        || return;
 
     my %h = map{ $_->nsdname => 1 } $result->answer;
     return keys(%h);
