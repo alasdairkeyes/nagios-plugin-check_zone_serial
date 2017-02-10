@@ -1,0 +1,177 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+use Net::DNS::Resolver;
+use Nagios::Plugin qw(%ERRORS);
+use Getopt::Long;
+
+my $VERSION = 0.1;
+
+my $max_domains_to_check = 10;
+
+    ## Define variables for later
+my @cli_domains;
+my @cli_nameservers;
+my $domain_file;
+my @file_domains;
+my @nameservers;
+my @domains_to_check;
+
+my $help;
+
+    ## Get command line switches
+GetOptions (
+    "nameserver=s"      => \@cli_nameservers,
+    "domains=s"         => \@cli_domains,
+    "file=s"            => \$domain_file,
+    "help"              => \$help,
+);
+
+    ## Show help
+help()
+    if $help;
+
+    ## Load domains from file, if specified
+if ($domain_file) {
+    if (-f $domain_file) {
+        open (my $fh, '<', $domain_file)
+            || quit("CRITICAL", "Cannot open '$domain_file': $!");
+
+            ## Parse file
+        foreach my $line (<$fh>) {
+            next
+                if ($line =~ /^\s*$/ || $line =~ /^\s*#/);
+            $line =~ s/\n//g;
+            push(@file_domains, $line);
+        }
+
+        close ($fh);
+    } else {
+        quit("CRITICAL", "File '$domain_file' doesn't exist");
+    }
+}
+
+    ## Check we don't have domains from file and CLI
+quit("CRITICAL", "Cannot check domains from CLI and file at the same time")
+    if (scalar(@file_domains) && scalar(@cli_domains));
+
+    ## Compile domains to check
+@domains_to_check = scalar(@file_domains)
+    ? @file_domains
+    : @cli_domains;
+
+@nameservers = @cli_nameservers;
+
+    ## Find duplicates in domains
+my $domains_hash = {};
+foreach my $domain_to_check (@domains_to_check) {
+    quit("CRITICAL", "Domain $domain_to_check is defined twice")
+        if (exists($domains_hash->{ $domain_to_check }));
+    $domains_hash->{ $domain_to_check } = 1;
+}
+
+    ## Check user has specified enough nameservers
+quit("CRITICAL", "If specifying nameserver, you must specify two or more")
+    if (scalar(@nameservers) == 1);
+
+    ## Check we have at least one domain to check
+quit("CRITICAL", "Must specify one or more domains")
+    unless(scalar(@domains_to_check));
+
+    ## Check we don't have too many - time constraints
+quit("CRITICAL", "Cannot check more than $max_domains_to_check domains at once")
+    if (scalar(@domains_to_check) > $max_domains_to_check);
+
+    ## Instantiate resolver once for speed
+my $resolver = Net::DNS::Resolver->new(
+    recurse => 0
+);
+
+my $errors = {};
+
+foreach my $domain_to_check (@domains_to_check) {
+
+        ## Use supplied nameservers or query DNS
+    my @check_nameservers = scalar(@nameservers)
+        ? @nameservers
+        : get_nameservers_for_domain($domain_to_check);
+
+        ## Check that we have enough nameservers
+    $errors->{ $domain_to_check } = "less than 2 nameservers"
+        if (scalar(@check_nameservers) < 2);
+
+    my $serials = {};
+
+    foreach my $nameserver (@check_nameservers) {
+
+            ## Set nameserver
+        $resolver->nameservers($nameserver);
+
+            ## Query SOA
+        my $result = $resolver->query($domain_to_check, 'SOA');
+        my @answers = $result->answer;
+
+            ## Error if there's more than one SOA answer
+        if (scalar(@answers) != 1) {
+            $errors->{ $domain_to_check } = "found " . scalar(@answers) . ' SOA records';
+            next;
+        }
+
+            ## Check value and add to hashref
+        if (my $serial = $answers[0]->serial) {
+            $serials->{ $serial } = 1;
+        } else {
+            $errors->{ $domain_to_check } = "found no serial found in answer"
+        }
+    }
+
+        ## Check for multiple serials
+    if (scalar(keys(%$serials)) != 1) {
+        $errors->{ $domain_to_check } = "Mismatching serials on $domain_to_check (" . join(',', keys(%$serials)) . ')';
+    }
+}
+
+    ## Check for errors and quit
+if (scalar(keys(%$errors))) {
+    quit("CRITICAL", join(
+        '',
+        map { $_  . ' ' . $errors->{ $_ } } keys(%$errors)
+    ));
+}
+
+    ## All OK
+quit("OK", "All domains are in sync");
+
+    ## Query DNS for NS records
+sub get_nameservers_for_domain {
+    my $domain = shift;
+
+    my $resolver = Net::DNS::Resolver->new();
+    my $result = $resolver->query($domain, 'NS');
+
+    my %h = map{ $_->nsdname => 1 } $result->answer;
+    return keys(%h);
+}
+
+    ## Function to handle output
+sub quit {
+    my $status = shift;
+    my $message = join('',@_);
+    print $status . ": $message\n";
+    exit $ERRORS{ $status };
+}
+
+    ## Help message
+sub help {
+    print "Version $VERSION\n";
+    print "USAGE\n";
+    print "   check_zone_serial [OPTIONS]\n\n";
+    print "OPTIONS\n";
+    print "  -h|--help          This help message\n";
+    print "  -d|--domain        Domain name to check. You can use this switch multiple times\n";
+    print "  -f|--file          Path to a text file that has a list of domains to check, one domain per line. If this is specified, then domains specified using -d are ignored\n";
+    print "  -n|--nameserver    Nameserver to use to check serial. This must be provided either 0 or >1 times. If this is not provided, the nameservers will be obtained via an NS lookup on the domain\n";
+    print "\n";
+    exit 0;
+}
