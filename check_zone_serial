@@ -132,7 +132,7 @@ foreach my $domain_to_check (@domains_to_check) {
     }
 
         ## Check for multiple serials
-    if (scalar(keys(%$serials)) != 1) {
+    if (!$errors->{ $domain_to_check } && scalar(keys(%$serials)) != 1) {
         $errors->{ $domain_to_check } = "Mismatching serials on $domain_to_check (" . join(',', keys(%$serials)) . ')';
     }
 }
