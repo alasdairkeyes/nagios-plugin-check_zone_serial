@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 use Net::DNS::Resolver;
-use Nagios::Plugin qw(%ERRORS);
+use Monitoring::Plugin qw(%ERRORS);
 use Getopt::Long;
 
 my $VERSION = 0.3;
