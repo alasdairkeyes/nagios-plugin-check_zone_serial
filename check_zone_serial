@@ -6,7 +6,7 @@ use Net::DNS::Resolver;
 use Monitoring::Plugin qw(%ERRORS);
 use Getopt::Long;
 
-my $VERSION = 0.3;
+my $VERSION = 0.4;
 
 my $max_domains_to_check = 10;
 
